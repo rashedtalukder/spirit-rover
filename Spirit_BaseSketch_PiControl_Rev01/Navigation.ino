@@ -16,6 +16,7 @@ Visit http://www.arduino.cc to learn about the Arduino.
 */
 
 #include "Navigation.h"
+#include <avr/pgmspace.h>
 
 //Ver. 1.0, Dustin Soodak
 
@@ -89,7 +90,7 @@ void UpdateGyroEdgeDetection(int GyroYAxisRawZeroed){//Ver. 1.0, Dustin Soodak
 void SimpleGyroNavigation(void){//Ver. 1.0, Dustin Soodak
   char n;
   //int nav_data[3];//Compiler error:  when nav_data[] local, it was not actually reserving space for this since it isn't explicitly set (is set by pointers)
-  char i,j;
+  int i,j;
   ConvertNavigationCoordinates(0);
   if(IRReceiving){
     if(IsIRDone())
@@ -149,11 +150,9 @@ void ConvertNavigationCoordinates(char NewXYMode){//Ver. 1.0, Dustin Soodak
 
 void SimpleNavigation(void){//Ver. 1.0, Dustin Soodak
   //can't be put in interrupt since I2C functions use an interrupt(update: new I2C functions don't use an interrupt)
-  char i,j,n,gn,an;
+  int i,j,gn,an;
   //int nav_data[3];//Compiler error:  when nav_data[] local, it was not actually reserving space for this since it isn't explicitly set (is set by pointers)
   int32_t AccelPositionNewDat[3]={0,0,0};
-  int32_t AccelVelocityNewDat[3]={0,0,0};
-  int32_t GyroPositionNewDat[3]={0,0,0};
   AverGyroVelocity=0;
   count++;
   ConvertNavigationCoordinates(0);
@@ -184,7 +183,8 @@ void SimpleNavigation(void){//Ver. 1.0, Dustin Soodak
     for(j=0;j<2;j++){
       GyroVelocity[j]=((int32_t)nav_data[j])-GyroZeroes[j];
     }
-    AverGyroVelocity/=gn;
+    if(gn>0)
+      AverGyroVelocity/=gn;
     if(gn>=31)
       GyroFifoOverflow=1;
     
@@ -229,7 +229,12 @@ void SimpleNavigation(void){//Ver. 1.0, Dustin Soodak
 
 
 #ifdef INT_VER
-const int SinFunctionTable[]={0,286,572,857,1143,1428,1713,1997,2280,2563,2845,3126,3406,3686,3964,4240,4516,4790,5063,5334,5604,5872,6138,6402,6664,6924,7182,7438,7692,7943,8192,8438,8682,8923,9162,9397,9630,9860,10087,10311,10531,10749,10963,11174,11381,11585,11786,11982,12176,12365,12551,12733,12911,13085,13255,13421,13583,13741,13894,14044,14189,14330,14466,14598,14726,14849,14968,15082,15191,15296,15396,15491,15582,15668,15749,15826,15897,15964,16026,16083,16135,16182,16225,16262,16294,16322,16344,16362,16374,16382,16384};
+const int16_t SinFunctionTable[] PROGMEM={0,286,572,857,1143,1428,1713,1997,2280,2563,2845,3126,3406,3686,3964,4240,4516,4790,5063,5334,5604,5872,6138,6402,6664,6924,7182,7438,7692,7943,8192,8438,8682,8923,9162,9397,9630,9860,10087,10311,10531,10749,10963,11174,11381,11585,11786,11982,12176,12365,12551,12733,12911,13085,13255,13421,13583,13741,13894,14044,14189,14330,14466,14598,14726,14849,14968,15082,15191,15296,15396,15491,15582,15668,15749,15826,15897,15964,16026,16083,16135,16182,16225,16262,16294,16322,16344,16362,16374,16382,16384};
+
+int ReadSinFunctionTable(int index){
+  return pgm_read_word(&SinFunctionTable[index]);
+}
+
 int SineFunction(int degr){//Ver. 1.0, Dustin Soodak
   int sign=1;
   if(degr<0){
@@ -239,13 +244,13 @@ int SineFunction(int degr){//Ver. 1.0, Dustin Soodak
   if(degr>360)
     degr%=360;
   if(degr<=90)
-    return sign*SinFunctionTable[degr];
+    return sign*ReadSinFunctionTable(degr);
   else if(degr<=180)
-    return sign*SinFunctionTable[180-degr];
+    return sign*ReadSinFunctionTable(180-degr);
   else if(degr<=270)
-    return -sign*SinFunctionTable[degr-180];
+    return -sign*ReadSinFunctionTable(degr-180);
   else
-    return -sign*SinFunctionTable[270-degr];
+    return -sign*ReadSinFunctionTable(270-degr);
 }
 int CosineFunction(int degr){//Ver. 1.0, Dustin Soodak
    if(degr<0)
@@ -253,13 +258,13 @@ int CosineFunction(int degr){//Ver. 1.0, Dustin Soodak
    if(degr>360)
      degr%=360;
    if(degr<=90)
-     return SinFunctionTable[90-degr];
+     return ReadSinFunctionTable(90-degr);
    else if(degr<=180)
-     return -SinFunctionTable[degr-90];
+     return -ReadSinFunctionTable(degr-90);
    else if(degr<=270)
-     return -SinFunctionTable[270-degr];
+     return -ReadSinFunctionTable(270-degr);
    else
-     return SinFunctionTable[360-degr];
+     return ReadSinFunctionTable(360-degr);
 }
 #endif //end #ifdef INT_VER
 
@@ -307,7 +312,7 @@ int32_t N_accelx,N_accely;//made global so compiler doesn't "optimize" them out.
 void NavigationXY(int GyroSensitivity, int AccelSensitivity){  //Ver. 1.0, Dustin Soodak
   //Note: (50,800) are good input values, these are 'dead zone' values
   //
-  signed char i,j,n,gn,an,m;
+  int i,j,gn,an,m;
   int32_t N_accelxraw,N_accelyraw;//32 bit since zeroes being subtracted might make a negative value out of range
   static int32_t N_accelxrawprev,N_accelyrawprev;//,N_gyrorawprev;
     
@@ -457,7 +462,9 @@ void NavigationXY(int GyroSensitivity, int AccelSensitivity){  //Ver. 1.0, Dusti
 
 // calibrates out stationary drift in sensors. MUST BE RUN WHEN RINGO IS PERFECTLY STILL!!
 void CalibrateNavigationSensors(void){//Ver. 1.0, Dustin Soodak
-  char i,j,n,prev;
+  int i,j,n;
+  char prev;
+  int timeout;
   int32_t totals[3];
   //int nav_data[3];//Compiler error:  when nav_data[] local, it was not actually reserving space for this since it isn't explicitly set (is set by pointers)
   prev=PauseNavigationInterrupt;
@@ -465,8 +472,8 @@ void CalibrateNavigationSensors(void){//Ver. 1.0, Dustin Soodak
   //Gyro average to find zero value (assuming not currently moving)
   for(i=0;i<3;i++)
     totals[i]=0;
-  i=1000;
-  while(GyroBufferSize()<20 && i)i--; 
+  timeout=1000;
+  while(GyroBufferSize()<20 && timeout)timeout--; 
   for(i=0;i<20;i++){
     GyroGetAxes(nav_data);
     for(j=0;j<3;j++){
@@ -479,8 +486,8 @@ void CalibrateNavigationSensors(void){//Ver. 1.0, Dustin Soodak
   //Accel average to find zero value (assuming not currently moving)
   for(i=0;i<3;i++)
     totals[i]=0;
-  i=1000;
-  while(AccelBufferSize()<20 && i)i--; 
+  timeout=1000;
+  while(AccelBufferSize()<20 && timeout)timeout--; 
   for(i=0;i<20;i++){
     AccelGetAxes(nav_accel);
     for(j=0;j<3;j++){
@@ -548,7 +555,7 @@ void CalibrateNavigationSensors(void){//Ver. 1.0, Dustin Soodak
 
 //re-sets Ringo's X, Y, and Heading coordinates to zeros
 void ZeroNavigation(void){//Ver. 1.0, Dustin Soodak
-  char i;
+  int i;
    //Zero total changes in position, velocity, and orientation
   for(i=0;i<3;i++){
     AccelPosition[i]=0;
@@ -568,7 +575,7 @@ void ZeroNavigation(void){//Ver. 1.0, Dustin Soodak
 
 
 void PauseNavigation(void){//Ver. 1.0, Dustin Soodak
-  char i;
+  int i;
   PauseNavigationInterrupt=1; 
   for(i=0;i<3;i++){
     AccelVelocity[i]=0;
@@ -576,7 +583,7 @@ void PauseNavigation(void){//Ver. 1.0, Dustin Soodak
 }
 
 void ResumeNavigation(void){//Ver. 1.0, Dustin Soodak
-  char i,n;
+  int i,n;
   //clear gyro buffer and save last values
   n=GyroBufferSize();
   for(i=0;i<n;i++){
@@ -608,7 +615,6 @@ char NavigationPaused(void){//Ver. 1.0, Dustin Soodak
 }
 
 void NavigationBegin(void){ //Ver. 1.0, Dustin Soodak   
-  char i;
   I2CBegin();//needs to be called before writing Gryro or Accel registers
   PauseNavigationInterrupt=1;
   //
@@ -709,15 +715,15 @@ int GetPositionY(void){//Ver. 1.0, Dustin Soodak
 }
          
 void DelayWithSimpleNavigation(int ms){//Ver. 1.0, Dustin Soodak
-  int32_t total=millis()+ms;
-  while(millis()<total){
+  unsigned long start=millis();
+  while(millis()-start<(unsigned long)ms){
     SimpleNavigation();
   }
 }
 
 void DelayWithNavigation(int ms){//Ver. 1.0, Dustin Soodak
-  int32_t total=millis()+ms;
-  while(millis()<total){
+  unsigned long start=millis();
+  while(millis()-start<(unsigned long)ms){
     NavigationXY(80,800);
   }
 }
@@ -844,7 +850,7 @@ int16_t GyroGetAxis(char Axis){//Ver. 1.0, Dustin Soodak
   int16_t val;//OUT_X_L=0x28, OUT_X_H=0x29 (y and z follow)
   if(Axis>2)
     Axis=2;
-  GyroReadRegisters((GYR_OUT_X_L+2*Axis)|0x80,(uint8_t*)val,2);//"In order to read multiple bytes, it is necessary to assert the most significant bit of the subaddressfield."
+  GyroReadRegisters((GYR_OUT_X_L+2*Axis)|0x80,(uint8_t*)&val,2);//"In order to read multiple bytes, it is necessary to assert the most significant bit of the subaddressfield."
   return val;
 }
 void GyroGetAxes(int *Axes){//Ver. 1.0, Dustin Soodak
@@ -938,7 +944,6 @@ void GyroSetFrequency(int Frequency){//Ver. 1.0, Dustin Soodak
 
 
 int32_t GyroDegreesToRaw(int Degrees){//Ver. 1.0, Dustin Soodak
-  int32_t raw=1;
   return GyroDegreesToRawMult*Degrees;
   /*if(GyroRangeByte==GR_250dps){
     raw=-Degrees*100000/875;
@@ -970,7 +975,6 @@ int GyroDegreesPerSecToRaw(int Degrees){//Ver. 1.0, Dustin Soodak
   return Degrees*GyroDegreesPerSecToRawMult;  
 }
 int GyroRawToDegrees(int32_t Raw){//Ver. 1.0, Dustin Soodak
-  int32_t deg=1;
   return Raw*GyroRawToDegreesMult;
   /*
   if(GyroRangeByte==GR_250dps)
@@ -1034,10 +1038,8 @@ int MinTurn(int ChangeInDegrees){//Ver. 1.0, Dustin Soodak
   }
   if(degr>360)
       degr=degr%360;
-  if(degr<=180)
-    degr;
-  else
-    -(360-degr);
+  if(degr>180)
+    degr=360-degr;
   if(IsNegative)
     degr=-degr;
   return degr;

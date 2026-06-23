@@ -16,6 +16,11 @@ volatile byte SPI_BufferOut[SPI_BUFFER_LENGTH];  //SPI Data Outgoing Buffer. Def
 volatile byte SPI_BufferPosition=0;              //
 
 volatile boolean SPI_InProgress;                 //
+volatile boolean SPI_LinkActive=0;
+volatile boolean SPI_FailsafeTripped=0;
+volatile byte SPI_LastCommand=0;
+volatile unsigned int SPI_ChecksumErrorCount=0;
+unsigned long SPI_LastPiCommandMs=0;
 unsigned char regTarget=0;              //Target I2C register on PIC processor
 signed int regValue=0;                  //Value to write to I2C target register
 
@@ -204,15 +209,14 @@ void PIC_ReadResetStatus(void){                       //TARGET REGISTER: 16   Re
 
 void PIC_SendUART(const String& TxString){                       //TARGET REGISTER: 17   Read copy of PIC PCON register following most recent reset                           
   regTarget = 17;
-  byte bufferLength = TxString.length();
+  byte bufferLength = min(TxString.length(), (unsigned int)(I2C_BUFFER_LENGTH-1));
   //Serial.println(bufferLength);
-  char charBuf[bufferLength+1];
-  TxString.toCharArray(charBuf, bufferLength+1);
 
-  for (byte counter = 0; counter <= bufferLength; counter++){
-    I2CData[counter] = charBuf[counter];
+  for (byte counter = 0; counter < bufferLength; counter++){
+    I2CData[counter] = TxString[counter];
     //Serial.print(I2CData[counter], HEX); Serial.print(" ");
   }
+  I2CData[bufferLength] = '\0';
   //Serial.println();
 
   I2CWrite(PIC_I2C_ADDRESS, regTarget, bufferLength+1);
@@ -222,6 +226,8 @@ void PIC_SendUART(const String& TxString){                       //TARGET REGIST
 String PIC_ReadUART(void){
   String receivedString;
   PIC_ReadUARTBufferCount();
+  PIC_UART_RxBufCount = min(PIC_UART_RxBufCount, (unsigned char)(I2C_BUFFER_LENGTH-2));
+  receivedString.reserve(PIC_UART_RxBufCount);
   regTarget = 18;
   PICReadRegs(PIC_I2C_ADDRESS, regTarget, I2CData, PIC_UART_RxBufCount+2);
   for (unsigned char i = 1; i<= PIC_UART_RxBufCount; i++){
@@ -723,6 +729,64 @@ void motorsFromPi(void){
   motors((SPI_BufferIn[1]-128)*2, (SPI_BufferIn[2]-128)*2);  
 }
 
+void SPI_RecordPiActivity(void){
+  SPI_LastPiCommandMs = millis();
+  SPI_LinkActive = true;
+}
+
+void SPI_LoadTelemetry(void){
+  unsigned int telemetryRange = rangeFinder < 0 ? 0 : rangeFinder;
+  byte statusFlags = chargeStatus & 0x03;
+  byte linkFlags = 0;
+
+  if(PIC_MotorStopInt)
+    statusFlags |= bit(2);
+  if(PIC_SurfaceSenseInt)
+    statusFlags |= bit(3);
+  if(PIC_RangeSenseInt)
+    statusFlags |= bit(4);
+  if(PIC_CurrentWarningInt)
+    statusFlags |= bit(5);
+  if(PIC_VoltageWarningInt)
+    statusFlags |= bit(6);
+  if(PIC_ShutdownNowInt)
+    statusFlags |= bit(7);
+
+  if(SPI_LinkActive)
+    linkFlags |= bit(0);
+  if(SPI_FailsafeTripped)
+    linkFlags |= bit(1);
+  if(runningMode == 0)
+    linkFlags |= bit(2);
+  if(servosInMotion)
+    linkFlags |= bit(3);
+
+  noInterrupts();
+  SPI_BufferOut[1] = SPI_RESPONSE_TELEMETRY;
+  SPI_BufferOut[2] = highByte(powerVoltage);
+  SPI_BufferOut[3] = lowByte(powerVoltage);
+  SPI_BufferOut[4] = highByte(powerCurrent);
+  SPI_BufferOut[5] = lowByte(powerCurrent);
+  SPI_BufferOut[6] = highByte(telemetryRange);
+  SPI_BufferOut[7] = lowByte(telemetryRange);
+  SPI_BufferOut[8] = statusFlags;
+  SPI_BufferOut[9] = linkFlags;
+  computeSPIChecksum(0);
+  interrupts();
+}
+
+void SPI_CheckFailsafe(void){
+  if(SPI_LinkActive && (millis() - SPI_LastPiCommandMs > SPI_LINK_TIMEOUT_MS)){
+    SPI_LinkActive = false;
+    if(runningMode == 0){
+      SPI_FailsafeTripped = true;
+      if(LeftMotor != 0 || RightMotor != 0)
+        motors(0,0);
+    }
+    SPI_LoadTelemetry();
+  }
+}
+
 
 
 
@@ -742,24 +806,48 @@ void motorsFromPi(void){
 // ***************************************************
 
 void SPI_Handler(void){       //add hooks to additional SPI commands to this function below
+  SPI_CheckFailsafe();
+
   if (SPI_Data_Received()){
     
-    for (int i = 0; i<= SPI_BUFFER_LENGTH; i++){
+    for (int i = 0; i < SPI_BUFFER_LENGTH; i++){
       //  Serial.print(SPI_BufferIn[i], HEX); Serial.print(" ");  //for debugging
     }
       switch (SPI_BufferIn[0]){
         
-        case 130:
+        case SPI_CMD_MOTORS:
+          SPI_RecordPiActivity();
+          SPI_LastCommand = SPI_CMD_MOTORS;
           runningMode = 0;  //clear local running mode - can be used to stop local Arduino program and only respond to
                             //motor commands (or other commands) from the Pi via SPI. Assumes Pi is controlling the rover.
+          SPI_FailsafeTripped = false;
           motors((SPI_BufferIn[1]-128)*2, (SPI_BufferIn[2]-128)*2);
+          SPI_LoadTelemetry();
+          break;
+
+        case SPI_CMD_TELEMETRY:
+          SPI_RecordPiActivity();
+          SPI_LastCommand = SPI_CMD_TELEMETRY;
+          SPI_LoadTelemetry();
+          break;
+
+        case SPI_CMD_HEARTBEAT:
+          SPI_RecordPiActivity();
+          SPI_LastCommand = SPI_CMD_HEARTBEAT;
+          SPI_FailsafeTripped = false;
+          SPI_LoadTelemetry();
           break;
         
-        case 255:     //reserved case. used to catch SPI communication error
+        case SPI_CMD_ERROR:     //reserved case. used to catch SPI communication error
+          SPI_ChecksumErrorCount++;
+          SPI_LoadTelemetry();
           // Serial.println("SPI Data Error");  //for debugging  
           break;
 
         default:
+          SPI_RecordPiActivity();
+          SPI_LastCommand = SPI_BufferIn[0];
+          SPI_LoadTelemetry();
           // Serial.println("SPI data received. No matching command.");  //for debugging
           break;
       } // end of switch (SPI_BufferIn[0])
@@ -797,7 +885,7 @@ bool SPI_Data_Received(void){
                                                                             //byte is not zero
       return 1; //good data has been received
     }else{
-      SPI_BufferIn[0] = 255;  //over-write address byte to 255, which indicates a data error has occured
+      SPI_BufferIn[0] = SPI_CMD_ERROR;  //over-write address byte to 255, which indicates a data error has occured
       return 1;
     }
   }else{
@@ -829,7 +917,7 @@ void SPI_Enable(void){        //Re-enables the SPI port, but does not alter the 
 
 void SPI_Reset(void){         //enables the slave SPI port, clears the outgoing SPI buffer to all zeros
   SPDR = 0x65;                //load outgoing SPI register for next send
-  SPI_ClearOutgoingBuffer();  //clear the outgoing buffer
+  SPI_LoadTelemetry();        //load the outgoing buffer with initial telemetry
   SPI_BufferPosition = 0;     //reset buffer position to the start
   SPI_InProgress = false;     //clear SPI in progress flag
   SPCR |= bit (SPE);          //turn on SPI in slave mode
@@ -874,7 +962,7 @@ ISR (SPI_STC_vect)
 
   if(SPI_BufferPosition > SPI_BUFFER_LENGTH-1){   //makes sure we don't over-run buffer and corrupt other data
     SPI_Disable();                                //turn off the SPI port so we don't get any more data
-    SPI_BUFFER_LENGTH-1;                          //make sure subsequent bytes are written to end arry location
+    SPI_BufferPosition = SPI_BUFFER_LENGTH-1;     //clamp index so subsequent bytes are written to the end array location
   }
 
 }  // end of interrupt routine SPI_STC_vect
@@ -953,7 +1041,7 @@ uint8_t I2CReadReg(uint8_t Device, uint8_t Reg){//Ver. 1.0, Dustin Soodak
 }
 
 void I2CWriteRegs(uint8_t Device, uint8_t Reg, uint8_t *TxBuffer, uint8_t Length){//Ver. 1.0, Dustin Soodak
-  char i;
+  uint8_t i;
   Wire.beginTransmission(Device); // transmit to device (note: actually just starts filling of buffer)
   Wire.write(Reg);                // sends one byte (the target register) 
   for(i=0;i<Length;i++){
@@ -976,7 +1064,7 @@ void I2CWriteReg(uint8_t Device, uint8_t Reg, uint8_t TxData){//Ver. 1.0, Dustin
 }
 
 void I2CWrite(uint8_t Device, uint8_t Reg, uint8_t Length){//Ver. 1.0, Dustin Soodak
-  char i;
+  uint8_t i;
   Wire.begin();
   Wire.beginTransmission(Device); // transmit to device (note: actually just starts filling of buffer)
   Wire.write(Reg);              // sends one byte 

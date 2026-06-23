@@ -3,4 +3,4 @@
 # navigate to home directory, then to this directory, then execute python script, then back home
 
 cd /home/pi/rover/pgpixelserver
-python PlumGeekPixelServer.py
+python3 PlumGeekPixelServer.py
