@@ -17,11 +17,25 @@
 #define SERIAL_SPEED 57600
 #define PIC_I2C_ADDRESS 0x32
 
+// SPI command bytes (first byte of an incoming SPI packet from the Pi)
+#define SPI_CMD_MOTORS    130    //motor speed command: bytes [1]=left, [2]=right (0-255, 128=stop)
+#define SPI_CMD_TELEMETRY 131    //request telemetry in the next outgoing SPI packet
+#define SPI_CMD_HEARTBEAT 132    //link heartbeat with no motion change
+#define SPI_CMD_ERROR     255    //reserved sentinel written into buffer[0] on a bad/checksum-failed packet
+
+#define SPI_RESPONSE_TELEMETRY 0x54
+#define SPI_LINK_TIMEOUT_MS 500
+
 extern uint8_t I2CData[I2C_BUFFER_LENGTH];     //I2C Data Buffer (in and out are shared). Define length above.
 extern volatile byte SPI_BufferIn[SPI_BUFFER_LENGTH];   //SPI Data Incomming Buffer. Define length above.
 extern volatile byte SPI_BufferOut[SPI_BUFFER_LENGTH];  //SPI Data Outgoing Buffer. Define length above.
 extern volatile byte SPI_BufferPosition;                //
 extern volatile boolean SPI_InProgress;                 //
+extern volatile boolean SPI_LinkActive;                 //true while recent Pi SPI commands are arriving
+extern volatile boolean SPI_FailsafeTripped;            //true after Pi-control motor timeout stops the rover
+extern volatile byte SPI_LastCommand;                   //last valid SPI command byte received
+extern volatile unsigned int SPI_ChecksumErrorCount;    //count of checksum-failed SPI packets
+extern unsigned long SPI_LastPiCommandMs;               //millis() of last valid Pi SPI command
 extern unsigned char regTarget;                //Target I2C register on PIC processor
 extern signed int regValue;                    //Value to write to I2C target register
 

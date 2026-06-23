@@ -34,10 +34,10 @@ Visit http://www.arduino.cc to learn about the Arduino.
 // ***************************************************
 
 #define I2C_Ready 9   //PIC brings high when done processing I2C packets
-#define INT0 4        //PIC pulls low when urgent status is present
-#define INT1 A2       //Other user defined interrupt uses. Connects to Raspberry Pi GPIO17
-                      //Pulling INT1 low for too long will cause Raspberry Pi to shutdown
-#define INT2 8        //Extra interrupt between PIC and Arduino for user defined functions
+#define PIC_INT0_PIN 4        //PIC pulls low when urgent status is present
+#define PIC_INT1_PIN A2       //Other user defined interrupt uses. Connects to Raspberry Pi GPIO17
+                              //Pulling INT1 low for too long will cause Raspberry Pi to shutdown
+#define PIC_INT2_PIN 8        //Extra interrupt between PIC and Arduino for user defined functions
 
 #define SPI_SS 10     //SPI Select Line
 #define SPI_MOSI 11   //SPI MOSI (Master Out / Slave In) Line
@@ -395,7 +395,7 @@ extern void RxIRStop(void);
 extern void RxIRRestart(char BytesToLookFor);
 extern char IsIRDone(void);
 extern byte GetIRButton(void);
-extern char IRNumOfBytes;
+extern unsigned char IRNumOfBytes;
 extern char CheckMenuButton(void);
 //
 extern byte GetIRButton(void);
@@ -427,7 +427,7 @@ extern const uint8_t IRRemoteButtons[][2];
 //Low level functions:
 extern int IRTransitionCount;
 extern unsigned char IRBytes[20];
-extern byte irData[]={0x00,0xFF,0x00,0x00};
+extern byte irData[4];
 extern char IRActive;
 extern volatile char IRReceiving;//note: IRReceiving turned off if IsIRDone() in regular or auto NavigationHandler() and causes ReadSideSensors() to repeat
 //
@@ -800,7 +800,7 @@ template <class T> int EEPROM_readAnything(int ee, T& value)
   //Ver. 1.1, Dustin Soodak
   //
   //Edit this section for each use:
-  typedef struct RecordedDataStruct{int left; int leftaver; int leftamb;  uint32_t t;};//can edit number, names, and data types
+  struct RecordedDataStruct{int left; int leftaver; int leftamb;  uint32_t t;};//can edit number, names, and data types
   #define RECORDED_DATA_ARRAY_LENGTH 1 //set to 1 if not using
   #define RecordedDataPrintRow() do{Serial.print(RecordedDataRow.left,DEC);Serial.print("\t");Serial.print(RecordedDataRow.leftaver,DEC);Serial.print("\t");Serial.print(RecordedDataRow.leftamb,DEC);Serial.print("\t");Serial.print(RecordedDataRow.t,DEC);}while(0)
  //
@@ -817,7 +817,7 @@ template <class T> int EEPROM_readAnything(int ee, T& value)
     do{for(RecordedDataN=0;RecordedDataN<sizeof(RecordedDataArray);RecordedDataN++)  \
       ((char*)RecordedDataArray)[RecordedDataN]=0;  \
     RecordedDataPosition=0;RecordedDataLength=0;RecordedDataMinDelay=uSDelay;RecordedDataStart=micros();RecordedDataPrev=RecordedDataStart-RecordedDataMinDelay;}while(0)
-   #define RecordedDataRefresh() \ 
+  #define RecordedDataRefresh() \
     do{if(RecordedDataMinDelay==0 || micros()-RecordedDataPrev>=RecordedDataMinDelay){  \
            RecordedDataArray[RecordedDataPosition]=RecordedDataRow;  \
            if(RecordedDataPosition<RECORDED_DATA_ARRAY_LENGTH-1) {RecordedDataPosition++;} else {RecordedDataPosition=0;} \

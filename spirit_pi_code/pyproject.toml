@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spirit-rover"
+version = "2.1.0"
+description = "Python library for controlling Spirit Rover hardware via Raspberry Pi"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Spirit Rover Team" }]
+keywords = ["raspberry-pi", "robotics", "rover", "i2c", "spi", "hardware"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Intended Audience :: Developers",
+    "Topic :: System :: Hardware",
+]
+dependencies = [
+    "smbus2>=0.4",  # I2C communication
+    "spidev>=3.5",  # SPI communication
+]
+
+[project.optional-dependencies]
+# Hardware-side LED pixel server (runs on the Raspberry Pi itself).
+server = [
+    "rpi_ws281x>=4.3",
+    "RPi.GPIO>=0.7",
+]
+dev = [
+    "pytest>=7.0",
+    "pylint>=2.15",
+]
+
+[tool.setuptools.packages.find]
+include = ["spirit_rover*"]
+
+[tool.pylint.format]
+max-line-length = 100
